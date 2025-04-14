@@ -131,6 +131,12 @@ async function handlePlaylist(playlistUrl) {
 					downloadedIds = [];
 				}
 			}
+
+			Object.assign(cacheData, {
+				url: playlistUrl,
+				artist: albumData.artist,
+				title: albumData.title,
+			});
 		});
 
 		meta.on('exit', () => {
@@ -143,7 +149,8 @@ async function handlePlaylist(playlistUrl) {
 				}
 			}).filter(Boolean);
 
-			Object.assign(cacheData, albumData);
+			// const { tracks: _, ...data } = albumData
+			// Object.assign(cacheData, data);
 
 			const tracksToDownload = tracks.filter(track => {
 				const already = downloadedIds.some(d => d.id === track.id);
