@@ -102,6 +102,8 @@ meta.on('data', (data) => {
 	ALBUM_DATA.artist = rawOutput.match(/"album_artist": "(.*?)"/)?.[1];
 
 	const folderName = argv.folder || ALBUM_DATA.title || defaultFolderName;
+	// sanitizing folder name
+	folder = folderName.replace(/[\/\\:*?"<>|]/g, "-")
 	folder = folderName;
 	fullPath = join(outputPath, folder);
 	cacheFile = join(cachePath, `cache_${folder.replace(/[\/]/g, '_')}.json`);
