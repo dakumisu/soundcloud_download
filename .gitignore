@@ -19,3 +19,5 @@ npm-debug.log*
 
 # Windows
 Thumbs.db
+
+tmp*
