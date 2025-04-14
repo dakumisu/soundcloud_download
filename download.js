@@ -1,6 +1,6 @@
 // downloader.js
-import { join } from 'path';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { join, resolve } from 'path';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
 import fs from 'fs-extra';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
@@ -30,26 +30,56 @@ const argv = yargs(hideBin(process.argv))
 		type: 'number',
 		default: 20
 	})
+	.option('clear-cache', {
+		describe: 'Clear the download cache for the folder',
+		type: 'boolean',
+		default: false
+	})
 	.help()
 	.argv;
 
 const playlistUrl = argv.url;
-const urlParts = playlistUrl.split('/').filter(Boolean);
+const playlistName = playlistUrl.split('/').filter(Boolean).pop().split('?').filter(Boolean).shift()
 const defaultFolderName = "Soundcloud_Playlist_Download";
-const folder = 'download/' + (argv.folder || urlParts[urlParts.length - 1] || defaultFolderName);
+// const folder = 'output/' + (argv.folder || playlistName || defaultFolderName);
 const maxDuration = argv.maxDuration * 60;
 
-const fullPath = join(__dirname, folder);
+const outputPath = join(__dirname, 'output');
+// const fullPath = join(__dirname, folder);
 const cachePath = join(__dirname, '.cache');
-const cacheFile = join(cachePath, 'downloaded.json');
+// const cacheFile = join(cachePath, `${folder.replace(/[\/]/g, '_')}.json`);
 
-if (!existsSync(fullPath)) mkdirSync(fullPath);
+let hasBeenInitialized = false;
+
+const ALBUM_DATA = {
+	url: playlistUrl,
+	artist: '',
+	title: '',
+	tracks: []
+};
+
+
+let folder = null
+let fullPath = null
+let cacheFile = null
+
+if (!existsSync(outputPath)) mkdirSync(outputPath);
+// if (!existsSync(fullPath)) mkdirSync(fullPath);
 if (!existsSync(cachePath)) mkdirSync(cachePath);
 
+// if (argv.clearCache && existsSync(cacheFile)) {
+// 	console.log('🧹 Clearing cache file...');
+// 	unlinkSync(cacheFile);
+// }
+
 let downloadedIds = [];
-if (existsSync(cacheFile)) {
-	downloadedIds = JSON.parse(readFileSync(cacheFile));
-}
+// if (existsSync(cacheFile)) {
+// 	try {
+// 		downloadedIds = JSON.parse(readFileSync(cacheFile));
+// 	} catch (err) {
+// 		downloadedIds = [];
+// 	}
+// }
 
 console.log('\n📡 Fetching playlist metadata...');
 const metadataCmd = [
@@ -61,7 +91,34 @@ const metadataCmd = [
 
 let rawOutput = '';
 const meta = pty.spawn('yt-dlp', metadataCmd, { cwd: process.cwd(), env: process.env });
-meta.on('data', (data) => { rawOutput += data; });
+
+meta.on('data', (data) => {
+	rawOutput += data;
+	console.log(data.toString());
+
+	if (hasBeenInitialized) return;
+
+	ALBUM_DATA.title = rawOutput.match(/"album": "(.*?)"/)?.[1];
+	ALBUM_DATA.artist = rawOutput.match(/"album_artist": "(.*?)"/)?.[1];
+
+	const folderName = argv.folder || ALBUM_DATA.title || defaultFolderName;
+	folder = folderName;
+	fullPath = join(outputPath, folder);
+	cacheFile = join(cachePath, `cache_${folder.replace(/[\/]/g, '_')}.json`);
+
+	if (!existsSync(fullPath)) mkdirSync(fullPath);
+	if (argv.clearCache && existsSync(cacheFile)) {
+		console.log('🧹 Clearing cache file...');
+		unlinkSync(cacheFile);
+	}
+	if (existsSync(cacheFile)) {
+		try {
+			downloadedIds = JSON.parse(readFileSync(cacheFile));
+		} catch (err) {
+			downloadedIds = [];
+		}
+	}
+});
 
 meta.on('exit', () => {
 	const lines = rawOutput.trim().split('\n');
@@ -74,16 +131,10 @@ meta.on('exit', () => {
 	}).filter(Boolean);
 
 	const tracksToDownload = tracks.filter(track => {
-		const already = downloadedIds.includes(track.id);
+		const already = downloadedIds.some(d => d.id === track.id);
 		const tooLong = track.duration && track.duration > maxDuration;
-
-		if (already) {
-			console.log(`⏩ Already downloaded: ${track.webpage_url_basename}`);
-		}
-		if (tooLong) {
-			console.log(`⏩ Skipping long track (${Math.round(track.duration / 60)} min): ${track.webpage_url_basename}`);
-		}
-
+		if (already) console.log(`⏩ Already downloaded: ${track.webpage_url_basename}`);
+		if (tooLong) console.log(`⏩ Skipping long track: ${track.webpage_url_basename}`);
 		return !already && !tooLong;
 	});
 
@@ -92,116 +143,62 @@ meta.on('exit', () => {
 		return;
 	}
 
-	const bar = new cliProgress.SingleBar({
-		format: (options, params, payload) => {
-			const percentage = (params.percentage ?? 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
-			return `📦 ${params.bar} | ${percentage}% | ${params.value}/${params.total} | ${payload.filename}`;
-		},
+	console.log();
+
+	const playlistBar = new cliProgress.SingleBar({
+		format: '📦 {bar} | {percentage}% | {value}/{total} | {filename}',
 		barCompleteChar: '█',
 		barIncompleteChar: '░',
 		hideCursor: true,
+		clearOnComplete: false
 	}, cliProgress.Presets.shades_classic);
 
 	let downloaded = 0;
-	bar.start(tracksToDownload.length, 0, { filename: '' });
+	playlistBar.start(tracksToDownload.length, 0, { filename: '' });
+
+	const spinnerFrames = ['⠋', '⠙', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+	let spinnerIndex = 0;
 
 	const downloadNext = (index) => {
 		if (index >= tracksToDownload.length) {
-			bar.stop();
-			writeFileSync(cacheFile, JSON.stringify(downloadedIds, null, 2));
+			playlistBar.stop();
 			console.log('\n🎉 Done! All new tracks downloaded.');
 			return;
 		}
 
 		const track = tracksToDownload[index];
-		bar.update(index, { filename: track.webpage_url_basename });
+		const filename = track.webpage_url_basename
+		playlistBar.update(index, { filename });
 
 		const args = [
 			track.url,
-			'--output', `${folder}/%(uploader)s - %(title)s.%(ext)s`,
-			'--extract-audio',
-			'--audio-format', 'mp3',
-			'--audio-quality', '0',
-			'--add-metadata',
-			'--embed-thumbnail',
-			'--no-warnings',
-			'--newline',
-			'--flat-playlist'
+			'--output', `${fullPath}/%(title)s.%(ext)s`,
+			'--extract-audio', '--audio-format', 'mp3', '--audio-quality', '0',
+			'--add-metadata', '--embed-thumbnail', '--no-warnings', '--newline'
 		];
 
 		const dl = pty.spawn('yt-dlp', args, { cwd: process.cwd(), env: process.env });
 
-		let trackBar = new cliProgress.SingleBar({
-			format: '🎵 {trackId} | {bar} | {percentage}% | {trackProgress}',
-			barCompleteChar: '█',
-			barIncompleteChar: '░',
-			hideCursor: true,
-		}, cliProgress.Presets.shades_classic);
+		const spinner = setInterval(() => {
+			spinnerIndex++;
+			playlistBar.update(downloaded, { filename: `${filename} ${spinnerFrames[spinnerIndex % spinnerFrames.length]}` });
+		}, 100);
 
-		let trackBarInstance = null;
-
-		// Track download progress
-		let lastTrackProgress = '';
-
-		// Set up the progress bar for the whole playlist
-		bar.start(tracksToDownload.length, 0, { filename: '' });
-
-		// Track download progress
-		dl.on('data', (chunk) => {
-			const output = chunk.toString();
-
-			// Look for the download percentage in the output
-			const match = output.match(/\[download\]\s+(\d{1,3}\.\d)%/);
-
-			// Ensure match is not null before accessing match[1]
-			if (match && match[1]) {
-				lastTrackProgress = `${parseFloat(match[1]).toLocaleString(undefined, { maximumFractionDigits: 1 })}%`;
-
-				// Update track progress line (first line: track name and progress)
-				process.stdout.clearLine(0);
-				process.stdout.cursorTo(0);
-				process.stdout.write(`🎵 Downloading: ${track.webpage_url_basename} | 📈 Track Progress: ${lastTrackProgress}`);
-
-				// If no track progress bar exists, create one for the first track
-				if (!trackBarInstance) {
-					trackBarInstance = new cliProgress.SingleBar({
-						format: '📦 ' + '{bar} | {percentage}% | {value}/{total} | ' + '{trackName} - {trackProgress}',
-						barCompleteChar: '█',
-						barIncompleteChar: '░',
-						hideCursor: true,
-					}, cliProgress.Presets.shades_classic);
-
-					trackBarInstance.start(100, 0, {
-						trackName: track.webpage_url_basename,
-						trackProgress: lastTrackProgress
-					});
-				} else {
-					// Update track progress bar for the current track
-					trackBarInstance.update(parseFloat(match[1]), {
-						trackName: track.webpage_url_basename,
-						trackProgress: lastTrackProgress
-					});
-				}
-			}
-		});
-
-		// When track download finishes
 		dl.on('exit', () => {
-			// Stop the track progress bar if it exists
-			if (trackBarInstance) {
-				trackBarInstance.stop();
-			}
+			clearInterval(spinner);
 
-			// Update the global playlist progress
-			downloadedIds.push(track.webpage_url_basename); // Use track.webpage_url_basename here
+			const downloadedTrackPath = join(__dirname, folder, `${filename}.mp3`);
+			downloadedIds.push({
+				id: track.id,
+				filename,
+				url: downloadedTrackPath
+			});
+			writeFileSync(cacheFile, JSON.stringify(downloadedIds, null, 2));
+
 			downloaded++;
-			bar.update(downloaded);
-
-			// Start the next download
+			playlistBar.update(downloaded);
 			downloadNext(index + 1);
 		});
-
-
 	};
 
 	downloadNext(0);

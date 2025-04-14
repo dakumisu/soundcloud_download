@@ -1,4 +1,5 @@
 /download
+/output
 .cache
 node_modules
 
