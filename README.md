@@ -27,20 +27,12 @@ A CLI tool to download and cache SoundCloud playlist tracks using `yt-dlp`.
 Clone the repo and install dependencies:
 
 ```bash
-git clone https://github.com/yourname/soundcloud-playlist-downloader.git
+git clone https://github.com/dakumisu/soundcloud_download.git
 cd soundcloud-playlist-downloader
 npm install
 ```
 
 ---
-
-## ⚙️ Usage
-
-Basic example:
-
-```bash
-node downloader.js --url https://soundcloud.com/user/sets/playlist-name
-```
 
 ### 🧩 Options
 
@@ -58,10 +50,10 @@ node downloader.js --url https://soundcloud.com/user/sets/playlist-name
 ## 📚 Example
 
 ```bash
-node downloader.js -u "https://soundcloud.com/user/sets/mix1" -f "MyMixes" -d 15 --clear-cache
+node downloader.js -u "https://soundcloud.com/user/sets/playlist-name" -f "destination-folder" -d 15 --clear-cache
 ```
 
-- Downloads one playlist into `output/MyMixes`
+- Downloads one playlist into `output/destination-folder`
 - Skips tracks longer than 15 minutes
 - Clears cache before downloading
 
