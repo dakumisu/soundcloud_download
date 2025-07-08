@@ -28,7 +28,7 @@ Clone the repo and install dependencies:
 
 ```bash
 git clone https://github.com/dakumisu/soundcloud_download.git
-cd soundcloud-playlist-downloader
+cd soundcloud_downloader
 npm install
 ```
 
