@@ -1,6 +1,6 @@
 # 🎵 SoundCloud Playlist Downloader
 
-A CLI tool to download and cache SoundCloud playlist tracks using `yt-dlp`.
+A CLI tool to download and cache SoundCloud playlist tracks using `[yt-dlp](https://github.com/yt-dlp/yt-dlp)`.
 
 ---
 
